@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style; frame-src https://accounts.google.com/gsi/; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://accounts.google.com/gsi/; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<title>CareTeam 跨職類共同照護</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="testbar" class="testbar" hidden></div>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="#/"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="14" width="4" height="7" fill="#9DC6BF"/><rect x="6" y="10" width="4" height="11" fill="#3E9A8E"/><rect x="11" y="6" width="4" height="15" fill="#0D6B66"/><rect x="16" y="1" width="4" height="20" fill="#18262E"/></svg><span>CareTeam</span><small id="hosp"></small></a>
+    <nav class="nav" id="nav" aria-label="主選單" hidden></nav>
+    <div class="who" id="who" hidden></div>
+  </div>
+</header>
+<div id="offline" class="offline" hidden>網路中斷：資料保留在這個分頁，連線恢復後按「重送」。請勿關閉分頁。</div>
+<main id="app" tabindex="-1"><p class="muted">載入中…</p></main>
+<div id="bar"></div>
+<script src="config.js"></script>
+<script src="literacy.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
