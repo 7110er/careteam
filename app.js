@@ -1150,7 +1150,12 @@
       S.handout = { pid: d.pid, id: r.handout.handout_id, draft: r.handout.draft, sections: r.handout.sections, note: r.note, comm: d.communication, completeness: r.completeness, edits: { points: [], hidden: {}, selfWritten: [] } };
       S.draft = null; S.b = null;
       location.hash = '#/handout';
-    }).catch(function (e) { btn.disabled = false; toast(e.message); });
+    }).catch(function (e) {
+      btn.disabled = false; toast(e.message);
+      // v1.6.5 D-02：送出失敗須持續可見，直到成功或離開；草稿保留在本分頁
+      var bar = btn.parentNode, old = bar && bar.querySelector('.submit-err'); if (old) old.remove();
+      if (bar) bar.insertBefore(h('p', { cls: 'err submit-err', role: 'alert', text: '尚未送出（' + new Date().toTimeString().slice(0, 5) + '）：' + e.message + '。紀錄仍在這個分頁，請再按一次送出。' }), btn);
+    });
   }
 
   /** 停復藥紀錄（R-09）：暫停或預定停藥，含吃回條件與日期；伺服器驗證 */
@@ -1357,7 +1362,7 @@
     return h('details', null, h('summary', { text: '交班給同仁或職類' }),
       h('div', { cls: 'field' }, h('label', { for: 'hfrole', text: '交班職類' }), role),
       h('div', { cls: 'field' }, h('label', { for: 'hfemail', text: '指定同仁電郵（選填）' }), email),
-      h('div', { cls: 'field' }, h('label', { for: 'hfnote', text: '交班事項（80 字內）' }), note), h('button', { cls: 'btn quiet', type: 'button', text: '送出交班', on: { click: function () { api('handoff', { personId: b.person.person_id, toRole: role.value, toEmail: email.value.trim(), note: note.value }).then(function () { toast('已交班'); }).catch(fail); } } }));
+      h('div', { cls: 'field' }, h('label', { for: 'hfnote', text: '交班事項（80 字內）' }), note), h('button', { cls: 'btn quiet', type: 'button', text: '送出交班', on: { click: function () { var hb = this; hb.disabled = true; api('handoff', { personId: b.person.person_id, toRole: role.value, toEmail: email.value.trim(), note: note.value }).then(function () { hb.disabled = false; toast('已交班'); var ok = h('p', { cls: 'alert info', role: 'status', text: '已交班給' + (role.options[role.selectedIndex] ? role.options[role.selectedIndex].text : role.value) + '（' + new Date().toTimeString().slice(0, 5) + '）' }); hb.parentNode.insertBefore(ok, hb.nextSibling); note.value = ''; email.value = ''; }).catch(function (e) { hb.disabled = false; fail(e); }); } } }));
   }
   function sdmPanel(b) {
     var p = h('div', { cls: 'panel' }, h('h3', { text: '共享決策' }));
@@ -1519,14 +1524,16 @@
   }
 
   /* ---------- 成效儀表板 ---------- */
-  var DV = { view: '群體', disease: '', role: '', from: '', to: '', stratum: '', practice: false };
+  var DV = { view: '群體', disease: '', role: '', medClass: '', from: '', to: '', stratum: '', practice: false };
   function dashboard(app) {
     app.appendChild(h('h1', { text: '照護成效' }));
     var tabs = h('div', { cls: 'tabs', role: 'tablist' });
-    ['群體', '疾病', '職類', '單位'].forEach(function (v) { if ((v === '職類' || v === '單位') && S.me.permission === 'L1') return; tabs.appendChild(h('button', { role: 'tab', type: 'button', 'aria-selected': String(DV.view === v), text: v, on: { click: function () { DV.view = v; route(); } } })); });
+    ['群體', '疾病', '藥物類別', '職類', '單位'].forEach(function (v) { if (v === '藥物類別' && !(S.info.med_classes || []).length) return; if ((v === '職類' || v === '單位') && S.me.permission === 'L1') return; tabs.appendChild(h('button', { role: 'tab', type: 'button', 'aria-selected': String(DV.view === v), text: v, on: { click: function () { DV.view = v; route(); } } })); });
     app.appendChild(tabs);
     var ctl = h('div', { cls: 'inline filters' });
     if (DV.view === '疾病') { if (!DV.disease) DV.disease = S.info.diseases[0] && S.info.diseases[0].id; ctl.appendChild(h('div', { cls: 'field' }, h('label', { for: 'dz', text: '疾病' }), h('select', { id: 'dz', on: { change: function (e) { DV.disease = e.target.value; route(); } } }, S.info.diseases.filter(function (d) { return d.level !== '共病標記'; }).map(function (d) { return h('option', { value: d.id, selected: d.id === DV.disease, text: d.name }); })))); }
+    // v1.6.6 藥物類別：期間結束時使用該類藥的病人，其藥物類別卡衛教進度（補登另列）
+    if (DV.view === '藥物類別') { if (!DV.medClass) DV.medClass = S.info.med_classes[0].id; ctl.appendChild(h('div', { cls: 'field' }, h('label', { for: 'mc', text: '藥物類別' }), h('select', { id: 'mc', on: { change: function (e) { DV.medClass = e.target.value; route(); } } }, S.info.med_classes.map(function (m) { return h('option', { value: m.id, selected: m.id === DV.medClass, text: m.name }); })))); }
     if (DV.view === '職類') { if (!DV.role) DV.role = S.me.acting_role; ctl.appendChild(h('div', { cls: 'field' }, h('label', { for: 'rl', text: '職類' }), h('select', { id: 'rl', on: { change: function (e) { DV.role = e.target.value; route(); } } }, S.info.roles.filter(function (r) { return S.me.permission === 'L3' || S.me.roles.indexOf(r.id) >= 0; }).map(function (r) { return h('option', { value: r.id, selected: r.id === DV.role, text: r.name }); })))); }
     var f = h('input', { type: 'month', id: 'pf', value: DV.from }), t = h('input', { type: 'month', id: 'pt', value: DV.to });
     ctl.appendChild(h('div', { cls: 'field' }, h('label', { for: 'pf', text: '起' }), f));
@@ -1539,7 +1546,7 @@
     ctl.appendChild(h('a', { cls: 'btn ghost', href: '#/report', text: '檢討會月報' }));
     var body = h('div', null, h('p', { cls: 'muted', text: '計算中…' })); app.appendChild(body);
     if (DV.view === '單位') { unitsView(body); return; }
-    api('dashboard', { view: DV.view, disease: DV.disease, role: DV.role, from: DV.from, to: DV.to, stratum: DV.stratum, practice: DV.practice }).then(function (D) { renderDash(clear(body), D); }).catch(function (e) { fail(e, body); });
+    api('dashboard', { view: DV.view, disease: DV.disease, role: DV.role, medClass: DV.medClass, from: DV.from, to: DV.to, stratum: DV.stratum, practice: DV.practice }).then(function (D) { renderDash(clear(body), D); }).catch(function (e) { fail(e, body); });
   }
   /** 空值只用三種寫法（9.4 第 5 點；V10） */
   function emptyText(c) { c = c || {}; if (!c.den) return c.pending ? '觀察期未屆滿' : '尚無紀錄'; if (c.masked) return '樣本不足（' + c.den + '）'; return '尚無紀錄'; }
@@ -1787,6 +1794,7 @@
       return h('div', null, h('div', { cls: 'hbars' }, rows), lg);
     }
     if (m.kind === '停復藥漏斗') return funnelChart(m.stages.map(function (s) { return { stage: s.stage, n: s.n }; }));
+    if (m.kind === '職類參與' && m.masked) return h('p', { cls: 'muted', text: '樣本不足（' + ((m.rows || [])[0] || {}).n + ' 人）。' });
     if (m.kind === '職類參與' || m.kind === '裝置步驟') return funnelChart((m.rows || []).map(function (r) { return { stage: r.label, n: r.n }; }));
     if (m.kind === '面向涵蓋' && !(m.rows || []).length) return h('p', { cls: 'muted', text: '尚無紀錄' });
     if (m.kind === '面向涵蓋') return h('table', { cls: 't' }, h('tr', null, h('th', { text: '主題' }), h('th', { cls: 'num', text: '已涵蓋' }), h('th', { cls: 'num', text: '應涵蓋' })), m.rows.map(function (r) { return h('tr', null, h('td', { text: r.label }), h('td', { cls: 'num', text: r.cov }), h('td', { cls: 'num', text: r.slots })); }));
@@ -1895,11 +1903,15 @@
   }
   function admin(app) {
     app.appendChild(h('h1', { text: '系統狀態' }));
+    // v1.6.5 D-03：檢查較久，顯示進度；換頁後晚到的結果丟棄，不得附加到其他頁
+    var wait = h('p', { cls: 'hint', role: 'status', text: '檢查中，可能需要 1–3 分鐘；可先離開此頁。' }); app.appendChild(wait);
+    var tok = location.hash, alive = function () { return location.hash === tok && document.body.contains(wait); };
+    var _ap = app; app = { appendChild: function (x) { if (alive()) { _ap.appendChild(x); wait.textContent = ''; } return x; } };
     api('admin.selfcheck', {}).then(function (r) { app.appendChild(h('section', { cls: 'panel' }, h('h3', { text: '部署檢查' }), h('ul', null, r.lines.map(function (l) { return h('li', { text: l }); })))); return api('admin.dictReport', {}); })
       .then(function (d) { app.appendChild(h('section', { cls: 'panel' }, h('h3', { text: '字典自檢：錯誤 ' + d.errors.length + '、警告 ' + d.warnings.length }),
         d.warnings.length > 50 ? h('p', { cls: 'hint', text: '錯誤全部列出；警告只顯示前 50 筆（共 ' + d.warnings.length + ' 筆），完整清單見內容建置報告。' }) : null,
         h('ul', null, d.errors.concat(d.warnings.slice(0, 50)).map(function (l) { return h('li', { text: l }); })))); })
-      .catch(function (e) { fail(e, app); });
+      .catch(function (e) { if (alive()) fail(e, _ap); });
   }
 
   /* ---------- 啟動 ---------- */
