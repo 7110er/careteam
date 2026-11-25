@@ -498,11 +498,8 @@ body.pview .nav, body.pview .who { display: none; }
 .kit-card h3{font-size:1rem;margin:.25rem 0}
 .kit-claims{padding-left:1.1rem}.kit-claims li{margin:.35rem 0}
 .chip.warn{background:#fff3cd;color:#664d03}
-/* v1.6.4 部署修正（2026-11-18）：GIS 按鈕樣式由 Google 以 inline <style> 注入，被 CSP style-src 擋下；改由本檔定義，不放寬 CSP */
-#gsi [role=button]{display:inline-flex;align-items:center;min-height:44px;padding:0 18px;border:1px solid #dadce0;border-radius:6px;background:#fff;color:#1f1f1f;font:500 15px/1.2 var(--font,system-ui);cursor:pointer;position:relative}
-#gsi [role=button]:hover{background:#f7f8f8}
-#gsi [role=button]:focus-visible{outline:3px solid #0D6B66;outline-offset:2px}
-#gsi [role=button] > div{display:flex;align-items:center;gap:10px}
-#gsi [role=button] svg{width:18px;height:18px;flex:none;display:block}
-#gsi [role=button] span + span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-#gsi iframe{border:0}
+
+/* v1.18.0 W05-B07：證據狀態未達 EV4 的醫事端標示（不靠顏色單獨傳達：文字含「未完成原文對照」） */
+.ev-low { color: var(--warn, #8a4b00); font-weight: 600; }
+.ev-detail { margin-top: var(--s1); font-size: var(--t-sm); }
+.cp-deferred { margin-top: var(--s2); font-size: var(--t-sm); }

@@ -378,6 +378,8 @@
       S.b = b; clear(app);
       app.appendChild(ptitle(b));
       app.appendChild(h('p', { cls: 'lede', text: '只列出這次要從病歷查、而且已過期或從未填過的項目。有效期內的資料已折疊。' }));
+      // v1.7.0 W01-B04（SYS-11）：本系統不接收檢驗數值，固定提示，不可關閉
+      app.appendChild(h('p', { cls: 'hint', role: 'note', 'data-fixed': 'critical', text: '本系統不讀取檢驗數值、不做危急值通報；危急值依院內危急值通報流程處理。' }));
       var vals = {}, medChanges = null, dz = [];
       var due = b.elements_prep.filter(function (e) { return e.due; }), ok = b.elements_prep.filter(function (e) { return !e.due; });
       var form = h('div');
@@ -430,6 +432,25 @@
     var ta = h('textarea', { 'aria-label': '貼上目前藥單', placeholder: '貼上目前藥單，每行一個品項' });
     var res = h('div');
     w.appendChild(h('p', { cls: 'muted', text: '目前 ' + b.meds.length + ' 項；' + (b.med_list_age_days === null ? '尚未核對' : '距上次核對 ' + Math.round(b.med_list_age_days) + ' 天') + (b.med_list_stale ? '（已過期）' : '') }));
+    // v1.7.0 W01-B03：歷史補登用藥只列出供核對，不算現行用藥
+    if (b.med_hist_only && b.med_hist_only.length) w.appendChild(h('p', { cls: 'hint', role: 'note', text: '歷史補登（未核對是否仍在使用）：' + b.med_hist_only.map(function (m) { return m.name; }).join('、') + '。貼上目前藥單核對後才會出現對應藥品卡。' }));
+    // v1.8.1 W01-B06：多用途藥由藥師或醫師確認用途（只列病人已確認的疾病）；用途決定藥品衛教歸屬到哪個疾病
+    if (b.meds && b.meds.length) {
+      var dzOk = (b.diseases || []).filter(function (d) { return d.status === '已確認'; });
+      var ml = h('ul', { cls: 'list' });
+      b.meds.forEach(function (m) {
+        var single = (m.inferred || []).length === 1;
+        var useTxt = (m.use || []).length ? m.use.map(function (id) { var d = dzOk.filter(function (x) { return x.id === id; })[0]; return d ? d.name : id; }).join('、') : (single ? '依字典推導' : '用途未確認');
+        var li = h('li', null, h('div', { cls: 'main' }, h('div', { cls: 't', text: m.name }), h('div', { cls: 'muted', text: '用途：' + useTxt })));
+        if (b.can_set_use && !single && dzOk.length) li.appendChild(seg(dzOk.map(function (d) { return { v: d.id, t: d.name }; }).concat([{ v: '不確定', t: '不確定' }]), m.use || [], function (v) {
+          var cur = (m.use || []).filter(function (x) { return x !== '不確定'; }), nx = v === '不確定' ? ['不確定'] : (cur.indexOf(v) >= 0 ? cur.filter(function (x) { return x !== v; }) : cur.concat([v]));
+          if (!nx.length) nx = ['不確定'];
+          api('setMedUse', { personId: b.person.person_id, medId: m.med_id, use: nx }).then(function (r) { m.use = r.use === '不確定' ? ['不確定'] : r.use.split('|'); toast('已記錄用途'); renderPatient($('app')); }).catch(function (e) { toast(e.message || '失敗'); });
+        }, '', m.name + '用途'));
+        ml.appendChild(li);
+      });
+      w.appendChild(h('details', null, h('summary', { text: '現行用藥與用途（' + b.meds.length + '）' }), ml));
+    }
     w.appendChild(ta);
     w.appendChild(h('button', { cls: 'btn ghost', type: 'button', text: '比對變更', on: { click: function () {
       api('importMeds', { personId: b.person.person_id, text: ta.value }).then(function (d) {
@@ -724,6 +745,8 @@
     if (!K.cards.length) box.appendChild(h('p', { cls: 'muted', text: '本職類在本病人現有疾病沒有已核准的工作卡。' }));
     K.cards.forEach(function (k) {
       var art = h('article', { cls: 'kit-card' }, h('h3', { text: k.disease_name + '｜' + k.triage + (k.signed ? '' : '（內容未核准）') }));
+      // v1.16.0：實質能力欄；空白者標「待補」
+      [['必要輸入', k.need || (k.triage !== '僅辨識轉介' ? '（待補）' : '')], ['判斷邊界', k.boundary || (k.triage !== '僅辨識轉介' ? '（待補）' : '')], ['轉介時機', k.when || (k.triage === '僅辨識轉介' ? '（待補）' : '')], ['交接資料', k.handoff || (k.triage === '僅辨識轉介' ? '（待補）' : '')]].forEach(function (x) { if (x[1]) art.appendChild(h('p', { cls: /待補/.test(x[1]) ? 'muted' : '' }, h('b', { text: x[0] + '：' }), h('span', { text: x[1] }))); });
       [['先問', k.ask], ['先做', k.act], ['轉介', k.refer], ['追蹤升級', k.follow]].forEach(function (x) { if (x[1]) art.appendChild(h('p', null, h('b', { text: x[0] + '：' }), h('span', { text: x[1] }))); });
       if (k.say_items.length) art.appendChild(h('p', { cls: 'hint', text: '怎麼說：用已核准的衛教項目——' + k.say_items.map(function (x) { return x.title; }).join('；') }));
       var cl = kitClaimList(K, k.claims); if (cl) art.appendChild(h('details', null, h('summary', { text: '依據（臨床事實 ' + k.claims.length + '）' }), cl));
@@ -932,6 +955,7 @@
     if (d.restored) app.appendChild(h('p', { cls: 'alert ' + (d.restored.dropped ? 'mid' : 'info'), role: 'status', text: d.restored.dropped ? '已接續上次的紀錄。名單已由他人更新，' + d.restored.dropped + ' 項不在目前名單上，已略過；其餘保留。' : '已接續上次的紀錄。' }));
     var grid = h('div', { cls: 'grid2' }); app.appendChild(grid);
     var main = h('div'), side = h('aside'); grid.appendChild(main); grid.appendChild(side);
+    var cpp = carePlanPanel(b); if (cpp) main.appendChild(cpp);
     var pqp = pqOpenPanel(b); if (pqp) main.appendChild(pqp);
     var kp = kitPanel(b); if (kp) side.appendChild(kp);
     var n = 0;
@@ -945,6 +969,27 @@
     renderSide(side, b, d);
     renderSubmitBar(b, d);
     saveDraft();
+  }
+  /** v1.11.0 W05-B05：整合照護計畫摘要（固定七段；空段顯示「無」以免誤以為漏看） */
+  function carePlanPanel(b) {
+    if (!b.care_plan) return null;
+    var box = h('section', { cls: 'panel careplan', 'aria-labelledby': 'cph' }, h('h2', { id: 'cph', text: '整合照護計畫' }));
+    var ol = h('ol', { cls: 'cp-list' });
+    b.care_plan.forEach(function (sec) {
+      var li = h('li', { cls: 'cp-' + sec.key }, h('div', { cls: 'cp-head' }, h('strong', { text: sec.label + '（' + sec.lines.length + '）' }), sec.handout.length ? h('span', { cls: 'muted', text: '　單張：' + sec.handout.join('、') } ) : h('span', { cls: 'muted', text: '　醫事端，不印' })));
+      if (!sec.lines.length) li.appendChild(h('p', { cls: 'muted', text: '無' }));
+      else li.appendChild(h('ul', null, sec.lines.slice(0, 6).map(function (x) {
+        var tail = [x.owner ? '主責 ' + x.owner : '', x.severity ? '嚴重度 ' + x.severity : '', x.learner || '', x.helps && x.helps.length ? '可協助：' + x.helps.join('、') : '', x.ask_first ? '先問再教' : ''].filter(Boolean).join('｜');
+        return h('li', { text: x.text + (tail ? '　' + tail : '') });
+      }).concat(sec.lines.length > 6 ? [h('li', { cls: 'muted', text: '另 ' + (sec.lines.length - 6) + ' 項見下方' })] : [])));
+      ol.appendChild(li);
+    });
+    box.appendChild(ol);
+    // v1.16.0 W01-B11：暫不宜衛教（適用但本次不教）與原因
+    if ((b.deferred_items || []).length) {
+      box.appendChild(h('details', { cls: 'cp-deferred' }, h('summary', { text: '暫不宜衛教 ' + b.deferred_items.length + ' 項（原因）' }), h('ul', null, b.deferred_items.map(function (x) { return h('li', { text: x.text + '：' + x.reasons.join('；') }); }))));
+    }
+    return box;
   }
   function stepHandover(n, b, d) {
     var H = b.handover; if (!d.ackStart) d.ackStart = Date.now();
@@ -985,6 +1030,8 @@
     if (conf.length > 1) s.appendChild(h('div', { cls: 'field' }, h('span', { cls: 'lab', text: '這次主要問題' }), seg(conf.map(function (x) { return { v: x.id, t: x.name }; }), d.primary, function (v) { set('primary', v); }, '', '主要問題')));
     var topics = uniqTopics(b);
     if (topics.length) s.appendChild(h('div', { cls: 'field' }, h('span', { cls: 'lab', text: '今天最想談（選填）' }), seg(topics, d.wanted, function (v) { set('wanted', d.wanted === v ? '' : v); }, '', '最想談')));
+    // v1.30.0 X09：資料未知而保留之個別化卡（醫事端先核實清單；不給病人看）
+    if ((b.held || []).length || b.med_stale) s.appendChild(h('div', { cls: 'field held' }, h('span', { cls: 'lab', text: '先核實（資料未知，卡片暫不顯示）' }), h('ul', null, (b.med_stale ? [h('li', { text: '用藥清單未核對或已逾期：類別卡照常顯示共通安全句，請先完成用藥核對' })] : []).concat((b.held || []).map(function (x) { return h('li', { text: x.name + '：' + (x.reasons || []).join('、') + '（' + x.behavior + '）' }); })))));
     if (b.readmit_question) s.appendChild(h('div', { cls: 'field' }, h('span', { cls: 'lab', text: '回家後沒做到的原因' }), seg(S.info.enums.READMIT_BARRIER, d.readmitBarrier, function (v) { d.readmitBarrier = v; touch(); renderPatient($('app')); }, '', '再入院障礙')));
     b.pending_commits.forEach(function (c) {
       var k = c.learner_id + '|' + c.item_id, f = d.followups[k] || {};
@@ -1007,13 +1054,21 @@
     if (b.deferred_safety) info.push('另有 ' + b.deferred_safety + ' 項安全級排到下次');
     if (b.out_of_scope) info.push('其他疾病待教 ' + b.out_of_scope + ' 項，可轉介');
     s.appendChild(h('p', { cls: 'muted', text: info.join('；') }));
+    // v1.8.2 W01-B09：必要評估缺或過期 → 相關項目先不出，顯示缺什麼、誰負責
+    (b.needs_data || []).forEach(function (n) {
+      if (n.mine && !n.hold.length && !n.maybe.length) return; // 本人可填且不影響項目：已在評估欄位，不重複提示
+      var parts = ['先補確認：' + n.name + '（' + (n.filler || []).map(roleNm).join('、') + (n.mine ? '，可由您填' : '') + '）'];
+      if (n.hold.length) parts.push('補齊前先不教：' + n.hold.map(function (x) { return x.core; }).join('、'));
+      if (n.maybe.length) parts.push('補齊後才能判斷是否需要：' + n.maybe.map(function (x) { return x.core; }).join('、'));
+      s.appendChild(h('p', { cls: 'alert mid', 'data-needs': n.element_id, text: parts.join('；') }));
+    });
     if (b.no_new) s.appendChild(h('p', { cls: 'alert info', text: '本次沒有新項目：做確認、給回饋、回答病人的問題即可。' }));
     if (b.backlog.split_hint) s.appendChild(h('p', { cls: 'alert mid', text: '生存必需待教 ' + b.backlog.by_grade['生存必需'] + ' 項，超過單次上限，建議用「交班」或「轉介」分給其他同仁。' }));
     var shown = b.queue.concat(d.added);
     shown.forEach(function (q) { s.appendChild(focusCard(q, b, d)); });
     if (b.alternatives.length) {
       s.appendChild(h('details', null, h('summary', { text: '加選其他項目（' + b.alternatives.length + '）' }), h('ul', { cls: 'list' }, b.alternatives.filter(function (a) { return !d.added.some(function (x) { return x.item_id === a.item_id && x.learner_id === a.learner_id; }); }).map(function (a) {
-        return h('li', null, ladder(a.current_level, a.target), h('div', { cls: 'main' }, h('div', { cls: 't', text: a.core }), h('div', { cls: 'muted', text: a.grade + '｜' + a.cat + (a.reasons.length ? '｜' + a.reasons.join('、') : '') })),
+        return h('li', null, ladder(a.current_level, a.target), h('div', { cls: 'main' }, h('div', { cls: 't', text: a.core }), h('div', { cls: 'muted', text: a.grade + '｜' + a.cat + (a.reasons.length ? '｜' + a.reasons.join('、') : '') + (a.helps && a.helps.length >= 2 ? '｜可協助 ' + a.helps.map(function (x) { return x.name; }).join('、') : '') })),
           h('button', { cls: 'btn quiet', type: 'button', text: '加選', on: { click: function () { api('recomputeQueue', { personId: b.person.person_id, setting: b.setting, learnerIds: d.learnerIds, curiosity: d.curiosity, time: d.time, primary: d.primary, wanted: a.topic_id }).then(function (nb) { var full = nb.queue.concat(nb.alternatives).filter(function (x) { return x.item_id === a.item_id; })[0]; d.added.push(full && full.variant !== undefined ? full : a); touch(); renderPatient($('app')); }).catch(fail); } } }),
           a.current_level < 2 ? h('button', { cls: 'btn quiet', type: 'button', text: '直接教回', title: '病人已在別處學會：直接做教回，通過即登記，最多到「會做」', on: { click: function () { d.added.push(Object.assign({}, a, { direct: true })); touch(); renderPatient($('app')); } } }) : null);
       }))));
@@ -1028,6 +1083,7 @@
     card.appendChild(h('div', { cls: 'head' }, ladder(q.current_level !== undefined ? q.current_level : 0, q.target, q.teach_level), h('div', { cls: 'core', text: q.item_id === 'HELP' ? q.title : q.core }),
       h('span', { cls: 'chip ' + (q.safety ? 'risk' : (['新', '升階', '差額'].indexOf(q.cat) >= 0 ? 'new' : 'ok')), text: tag + '：教到「' + (LV[q.teach_level] || ('L' + q.teach_level)) + '」' })));
     card.appendChild(h('div', { cls: 'why', text: [q.learner, q.grade].concat(q.reasons || []).filter(Boolean).join('｜') }));
+    if (q.helps && q.helps.length >= 2) card.appendChild(h('div', { cls: 'muted', 'data-helps': '1', text: '一次衛教可協助：' + q.helps.map(function (x) { return x.name; }).join('、') + '（各疾病特有內容仍須另確認）' }));
     if (q.item_id === 'HELP') {
       if (q.new_lines && q.new_lines.length && (q.current_level || 0) >= 1) card.appendChild(h('p', { cls: 'alert mid', text: '新增：' + q.new_lines.join('、') }));
       card.appendChild(h('ul', { cls: 'l119' }, q.l119.map(function (x) { return h('li', { text: x + (q.highlight.indexOf(x) >= 0 ? '' : '') }); })));
@@ -1055,6 +1111,12 @@
     var tbq = q.lens && q.lens.tb_question || (q.variant && q.variant.tb_question) || q.tb_question;
     card.appendChild(h('div', { cls: 'tbq', text: '教回：' + (tbq || '') }));
     if (q.pass_criteria) card.appendChild(h('div', { cls: 'pass-crit', text: '通過判準：' + q.pass_criteria }));
+    // v1.18.0 W05-B07：證據狀態與主張（醫事端）；未達 EV4 者標示
+    if (q.ev) {
+      var evd = h('details', { cls: 'ev-detail' }, h('summary', { cls: /^EV[45]/.test(q.ev) ? 'muted' : 'ev-low', text: '證據 ' + q.ev + (/^EV[45]/.test(q.ev) ? '' : '（未完成原文對照）') + (q.ev_claims && q.ev_claims.length ? '｜主張 ' + q.ev_claims.length : '') }));
+      (q.ev_claims || []).forEach(function (c) { evd.appendChild(h('p', { cls: 'muted', text: c.ev + '｜' + c.text + '｜' + (c.source || '') + ' ' + (c.loc || '') })); });
+      card.appendChild(evd);
+    }
     card.appendChild(seg(S.info.enums.TB_RESULT, r.tb_result, function (v) { r.tb_result = v; touch(); renderPatient($('app')); renderSubmitBar(S.b, d); }, 'tb', '教回結果'));
     // UX11-14：溝通有困難時每張卡都可改用示範（Show-me）教回，並提示可請在場照顧者協助
     var commHard = d.communication && d.communication !== '無困難';
@@ -1314,10 +1376,33 @@
     if (b.appts && (b.appts.upcoming.length || b.appts.recent.length)) side.appendChild(apptSidePanel(b));
     side.appendChild(threadPanel(b));
     side.appendChild(h('div', { cls: 'panel' }, learnerForm(b)));
+    // v1.8.2 W01-B07：資料來源與時效（推論、自述、補登不當已確認事實）
+    if (b.facts && b.facts.length) side.appendChild(h('details', { cls: 'panel' }, h('summary', { text: '資料來源與時效（' + b.facts.length + '）' }), h('ul', { cls: 'list' }, b.facts.map(function (f) {
+      return h('li', null, h('span', { cls: 'chip ' + (f.cls === '專業確認' ? 'ok' : 'warn'), text: f.cls }), ' ' + f.kind + '｜' + f.label + '：' + f.value + (f.by_role ? '（' + roleNm(f.by_role) + '）' : '') + (f.age_days !== null && f.age_days !== undefined ? '｜' + f.age_days + ' 天前' : '') + (f.stale ? '｜清單已過期' : ''));
+    }))));
+    // v1.8.3 W05-B03：病人層級照護面板——學到哪、誰教的、誰確認的、可協助哪些疾病、何時再確認
+    if (b.learning_panel && b.learning_panel.length) side.appendChild(h('details', { cls: 'panel' }, h('summary', { text: '學習紀錄（' + b.learning_panel.length + '）' }), stackTable(rtable(['學習者', '項目', '層級', '教的人', '確認的人', '可協助', '再確認'], b.learning_panel.map(function (x) {
+      return h('tr', null, h('td', { text: x.learner }), h('td', { text: x.core }), h('td', { text: (LV[x.level] || x.level) + (x.last_result ? '｜' + x.last_result : '') }), h('td', { text: x.taught_by ? roleNm(x.taught_by) + ' ' + String(x.taught_ts).slice(0, 10) + (x.backfill ? '（補登）' : '') : '—' }), h('td', { text: x.confirmed_by ? roleNm(x.confirmed_by) + ' ' + String(x.confirmed_ts).slice(0, 10) : '—' }), h('td', { text: (x.helps || []).map(function (d) { return d.name; }).join('、') || '—' }), h('td', { text: x.recheck || '—' }));
+    })))));
     if (b.safety_alerts.length) side.appendChild(h('div', { cls: 'panel' }, h('h3', { text: '安全提示' }), b.safety_alerts.map(function (a) { return h('div', { cls: 'alert ' + (a.severity === '高' ? 'high' : 'mid'), text: a.message + (a.unsigned ? '（規則待簽核）' : '') }); })));
+    // v1.10.0 W05-B06：衝突面板——涉及項目、成立條件、嚴重度、兩方依據、尚缺資料、主責、裁決狀態與到期；裁決只記選項
     b.conflicts.filter(function (c) { return !c.resolved; }).forEach(function (c) {
-      side.appendChild(h('div', { cls: 'panel' }, h('h3', { text: '待裁決的建議衝突' }), h('p', { text: '單張先印：「' + c.neutral + '」' }), h('div', { cls: 'muted', text: '甲：' + c.aBasis + '｜乙：' + c.bBasis }),
-        S.me.acting_role === c.role ? seg([{ v: 'A', t: '採甲' }, { v: 'B', t: '採乙' }, { v: '個別化', t: '個別化' }], null, function (v) { api('adjudicate', { personId: b.person.person_id, conflictId: c.id, choice: v }).then(function (nb) { S.b = nb; renderPatient($('app')); toast('已裁決'); }).catch(fail); }) : h('div', { cls: 'muted', text: '由' + c.role + '裁決' })));
+      var nameOf = function (id) { var q = b.queue.concat(b.alternatives || []).filter(function (x) { return x.item_id === id; })[0]; return q ? q.core : id; };
+      var pn = h('div', { cls: 'panel', 'data-conflict': c.id }, h('h3', { text: '待裁決的建議衝突（' + (c.severity || '中') + '）' + (c.unsigned ? '｜衝突規則待簽核' : '') }));
+      pn.appendChild(h('p', { text: '暫緩的項目：' + (c.items || []).map(nameOf).join('、') }));
+      if (c.cond) pn.appendChild(h('div', { cls: 'muted', text: '成立條件：' + c.cond }));
+      // v1.17.0 W06-B14：證據狀態與仲裁欄（指令 25）；未登錄者如實顯示
+      pn.appendChild(h('div', { cls: 'muted', text: '證據狀態：' + (c.ev || '未登錄') + (/^EV[45]/.test(c.ev || '') ? '' : '（雙方原文未完成對照）') }));
+      [['替代方案', c.alt], ['例外', c.exception], ['監測', c.monitor], ['停止或升級', c.escalate]].forEach(function (x) { if (x[1]) pn.appendChild(h('div', { cls: 'muted', text: x[0] + '：' + x[1] })); });
+      if (c.aBasis || c.bBasis) pn.appendChild(h('div', { cls: 'muted', text: (c.list ? '依據：' : '甲：') + (c.aBasis || '') + (c.bBasis ? (c.list ? '；' : '｜乙：') + c.bBasis : '') }));
+      if (c.needs && c.needs.length) pn.appendChild(h('p', { cls: 'alert mid', text: '尚缺資料：' + c.needs.join('、') + '（補齊前維持暫緩）' }));
+      if (c.expired) pn.appendChild(h('p', { cls: 'alert mid', text: '前次裁決失效：' + c.expired + '，請重新裁決' }));
+      if (c.keep_block) pn.appendChild(h('p', { cls: 'muted', text: '前次裁決：' + c.ruling.choice + '（維持暫緩）' }));
+      pn.appendChild(h('p', { cls: 'muted', text: c.neutral ? '單張先印：「' + c.neutral + '」' : '單張不印此主題（中性句未簽核）' }));
+      var opts = c.list ? ['可教', '整合', '分流', '皆不適用', '暫緩轉專業', '證據不足'] : ['A', 'B', '整合', '分流', '皆不適用', '暫緩轉專業', '證據不足'];
+      var lab = { A: '採甲', B: '採乙' };
+      pn.appendChild(S.me.acting_role === c.role ? seg(opts.map(function (v) { return { v: v, t: lab[v] || v }; }), null, function (v) { api('adjudicate', { personId: b.person.person_id, conflictId: c.id, choice: v }, { idemKey: 'ADJ-' + uid() }).then(function (nb) { S.b = nb; renderPatient($('app')); toast('已記錄裁決'); }).catch(fail); }, '', '裁決') : h('div', { cls: 'muted', text: '由' + roleNm(c.role) + '裁決' }));
+      side.appendChild(pn);
     });
     if (b.decisions.length) side.appendChild(sdmPanel(b));
     var mp = h('div', { cls: 'panel' }, h('h3', { text: '全人照護地圖' }));
@@ -1428,7 +1513,7 @@
         var pe = E.points.filter(function (x) { return x.i === i; })[0] || (E.points.push({ i: i }), E.points[E.points.length - 1]);
         var core = h('div', { cls: 'core', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '核心訊息', text: pe.core !== undefined ? pe.core : p.core, on: { blur: function (e) { var v = e.target.textContent.trim(); if (v !== p.core) { pe.core = v; if (!pe.coreReason) { pe.coreReason = '個別化'; } } } } });
         var txt = h('div', { contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '說明', text: pe.text !== undefined ? pe.text : p.text, on: { blur: function (e) { var v = e.target.textContent.trim(); if (v !== p.text) { pe.text = v; var er = lit(v); if (er.length) toast(er[0]); } } } });
-        return h('div', { style: { marginBottom: '12px' } }, core, /* VR11R4-2：有講法全文時不再加印一句話重點，避免三行同義 */ p.keypoint && !p.text && p.keypoint !== (pe.core !== undefined ? pe.core : p.core) ? h('div', { text: p.keypoint }) : null, txt, p.advanced ? h('div', { cls: 'muted', text: p.advanced }) : null,
+        return h('div', { style: { marginBottom: '12px' } }, core, /* VR11R4-2：有講法全文時不再加印一句話重點，避免三行同義 */ p.keypoint && !p.text && p.keypoint !== (pe.core !== undefined ? pe.core : p.core) ? h('div', { text: p.keypoint }) : null, txt, p.also ? h('div', { cls: 'muted', text: p.also }) : null, p.advanced ? h('div', { cls: 'muted', text: p.advanced }) : null,
           p.alts && p.alts.length > 1 ? h('div', { cls: 'noprint' }, h('button', { cls: 'btn quiet', type: 'button', text: '換說法', on: { click: function () { var cur = pe.variant_id || p.variant_id; var nx = p.alts[(p.alts.indexOf(cur) + 1) % p.alts.length]; pe.variant_id = nx; toast('存檔時套用另一種已簽核說法'); } } })) : null);
       })));
       if (D.known.length) sheet.appendChild(sec('known', '您已經會的', h('ul', null, D.known.map(function (k) { return h('li', { text: k }); }))));
@@ -1528,7 +1613,7 @@
   function dashboard(app) {
     app.appendChild(h('h1', { text: '照護成效' }));
     var tabs = h('div', { cls: 'tabs', role: 'tablist' });
-    ['群體', '疾病', '藥物類別', '職類', '單位'].forEach(function (v) { if (v === '藥物類別' && !(S.info.med_classes || []).length) return; if ((v === '職類' || v === '單位') && S.me.permission === 'L1') return; tabs.appendChild(h('button', { role: 'tab', type: 'button', 'aria-selected': String(DV.view === v), text: v, on: { click: function () { DV.view = v; route(); } } })); });
+    ['群體', '疾病', '藥物類別', '職類', '單位', '雙軸', '內容治理'].forEach(function (v) { if (v === '藥物類別' && !(S.info.med_classes || []).length) return; if ((v === '職類' || v === '單位' || v === '雙軸' || v === '內容治理') && S.me.permission === 'L1') return; tabs.appendChild(h('button', { role: 'tab', type: 'button', 'aria-selected': String(DV.view === v), text: v, on: { click: function () { DV.view = v; route(); } } })); });
     app.appendChild(tabs);
     var ctl = h('div', { cls: 'inline filters' });
     if (DV.view === '疾病') { if (!DV.disease) DV.disease = S.info.diseases[0] && S.info.diseases[0].id; ctl.appendChild(h('div', { cls: 'field' }, h('label', { for: 'dz', text: '疾病' }), h('select', { id: 'dz', on: { change: function (e) { DV.disease = e.target.value; route(); } } }, S.info.diseases.filter(function (d) { return d.level !== '共病標記'; }).map(function (d) { return h('option', { value: d.id, selected: d.id === DV.disease, text: d.name }); })))); }
@@ -1546,10 +1631,12 @@
     ctl.appendChild(h('a', { cls: 'btn ghost', href: '#/report', text: '檢討會月報' }));
     var body = h('div', null, h('p', { cls: 'muted', text: '計算中…' })); app.appendChild(body);
     if (DV.view === '單位') { unitsView(body); return; }
+    if (DV.view === '雙軸') { dualView(body); return; }
+    if (DV.view === '內容治理') { govView(body); return; }
     api('dashboard', { view: DV.view, disease: DV.disease, role: DV.role, medClass: DV.medClass, from: DV.from, to: DV.to, stratum: DV.stratum, practice: DV.practice }).then(function (D) { renderDash(clear(body), D); }).catch(function (e) { fail(e, body); });
   }
   /** 空值只用三種寫法（9.4 第 5 點；V10） */
-  function emptyText(c) { c = c || {}; if (!c.den) return c.pending ? '觀察期未屆滿' : '尚無紀錄'; if (c.masked) return '樣本不足（' + c.den + '）'; return '尚無紀錄'; }
+  function emptyText(c) { c = c || {}; if (c.unbuilt) return '字典未建'; if (!c.den) return c.pending ? '觀察期未屆滿' : '尚無紀錄'; if (c.masked) return '樣本不足（' + c.den + '）'; return '尚無紀錄'; }
   /** VR11R2-7：分數與空值單一寫法（「a / b」「n = b」「尚無紀錄」「樣本不足（n）」） */
   function fracText(c) { c = c || {}; var has = function (v) { return v !== null && v !== undefined; }; return has(c.num) && has(c.den) ? c.num + ' / ' + c.den : (has(c.den) ? 'n = ' + c.den : '—'); }
   function valText(c) { c = c || {}; return c.masked || c.value === null || c.value === undefined ? emptyText(c) : c.value + (c.unit === '率' ? '%' : ''); }
@@ -1574,7 +1661,7 @@
     box.appendChild(h('p', { cls: 'muted', text: '期間 ' + D.period.label + '｜更新 ' + D.updated.slice(0, 16).replace('T', ' ') + '｜' + maskNote(D) + (D.practice ? '｜只含演練資料' : '｜演練資料不計入') }));
     var kp = h('div', { cls: 'kpis' });
     // VR11-17：尚無紀錄的卡收合成一列，不與有值卡等高並排
-    var emptyCard = function (c) { var x = c.extra || {}; return (c.value === null || c.value === undefined) && !c.den && !(x.missing && x.missing.den) && !c.pending; };
+    var emptyCard = function (c) { var x = c.extra || {}; return (c.value === null || c.value === undefined) && !c.den && !(x.missing && x.missing.den) && !c.pending && !c.unbuilt; };
     var tiles = function (ids, into) { var empties = []; ids.forEach(function (id) { var c = D.cards[id]; if (!c) return; if (emptyCard(c)) empties.push(c.name); else into.appendChild(kpiTile(c)); }); return empties; };
     var emH = tiles(D.home, kp); if (emH.length) kp.appendChild(h('p', { cls: 'muted kpi-empty', text: '尚無紀錄：' + emH.join('、') }));
     box.appendChild(kp);
@@ -1607,6 +1694,90 @@
     else rv.appendChild(h('ol', null, L.reviews.map(function (r) { return h('li', null, h('div', { cls: 'rt' }, h('b', { text: r.title }), h('span', { cls: 'chip', text: ({ '照護鏈': '流失最多的環節', '推移圖訊號': '連續變化', '低於目標': '未達目標', '公平性': '族群差距' })[r.kind] || r.kind })), h('div', { text: r.text }), h('div', { cls: 'who', text: '建議找' + r.who + '討論' + (r.topic ? '：' + r.topic : '') })); })));
     rv.appendChild(h('p', { cls: 'hint', text: '建議由固定規則挑出：流失最多的環節、連續往不好方向變化的指標、未達目標的指標、不同族群差距大的指標。只指出在哪裡，不判斷原因。' }));
     return h('div', { cls: 'layer1' }, p, rv);
+  }
+  /** v1.18.0 W07-B09：內容治理（九項分列，不設總分） */
+  function govView(body) {
+    api('content.governance', {}).then(function (G) {
+      clear(body);
+      body.appendChild(h('p', { cls: 'alert', role: 'note', text: G.note }));
+      var row = function (a, b, c) { return [a, b, c]; };
+      body.appendChild(h('h2', { text: '九項指標' }));
+      body.appendChild(stackTable(rtable(['面向', '現況', '說明'], [
+        row('結構覆蓋', '有內容 ' + G.structure.ok + '｜缺口 ' + (G.structure.gap + G.structure.blank), '只代表病人會看到東西'),
+        row('實證覆蓋', 'L1 達 ' + G.evidence.L1.ok + '／' + (G.evidence.L1.ok + G.evidence.L1.no) + '｜項目 ' + Object.keys(G.evidence.items_by_ev).map(function (k) { return k + ' ' + G.evidence.items_by_ev[k]; }).join('、'), '格內全部項目 EV4 以上才算'),
+        row('來源治理', '來源 ' + G.evidence.sources_total + '｜未就緒 ' + G.evidence.sources_not_ready, '未就緒＝已被取代、未確認現行版或未取得全文'),
+        row('臨床充分性', '充分 ' + G.adequacy.ok + '｜未充分 ' + G.adequacy.no + '｜分母未確認 ' + G.adequacy.unset, '分母＝已確認的必要學習目標'),
+        row('衛教可執行性（真人）', '通過 ' + G.usability.ok + '｜未通過 ' + G.usability.no + '｜未測 ' + G.usability.untested, 'PEMAT 兩職類以上、皆達 70'),
+        row('職類實質能力', '達 ' + G.roles.ok + '｜未達 ' + G.roles.no, '可執行／可協作須引用 EV4 並有必要輸入與判斷邊界'),
+        row('跨病共享品質', '可認列 ' + G.share.ok + '｜待證據 ' + G.share.wait + '｜不適用 ' + G.share.na, 'S0／S1 兩端 EV4 才可認列'),
+        row('衝突裁決', G.conflicts.length + ' 列｜證據 EV4 以上 ' + G.conflicts.filter(function (c) { return /^EV[45]/.test(c.ev); }).length + '｜已簽 ' + G.conflicts.filter(function (c) { return c.signed; }).length, '證據未登錄者如實顯示'),
+        row('人工簽核進度', G.sign.map(function (x) { return x.table.replace('Dict_', '') + ' ' + x.signed + '/' + x.total; }).join('、'), '具名簽核才算'),
+        row('真人識能驗收進度', '評分 ' + G.pemat.rows + ' 筆｜' + G.pemat.packs + ' 包', '抽樣表見 docs/PEMAT抽樣表.csv')
+      ].map(function (r) { return h('tr', null, r.map(function (x) { return h('td', { text: String(x) }); })); }))));
+      body.appendChild(h('h2', { text: '疾病 × 九面向（L0｜L1｜L2）' }));
+      var fs = G.diseases.length ? G.diseases[0].cells.map(function (c) { return c.facet; }) : [];
+      body.appendChild(stackTable(rtable(['疾病'].concat(fs, ['L3']), G.diseases.map(function (d) {
+        return h('tr', null, [h('td', { text: d.name })].concat(d.cells.map(function (c) { return h('td', { cls: c.L0 === '空' ? 'ev-low' : '', text: c.L0 + '｜' + c.L1 + '｜' + (c.L2 === '分母未確認' ? '未定' : c.L2) }); }), [h('td', { text: d.L3 })]));
+      }))));
+    }).catch(function (e) { fail(e, body); });
+  }
+
+  /** v1.9.0 W07-B04／B06、W04-B03：雙軸統計——服務量與成效分離；疾病群組可重疊；職類量不因多疾病歸屬放大 */
+  function dualView(body) {
+    api('stats.units', { from: DV.from, to: DV.to, practice: DV.practice }).then(function (U) {
+      clear(body);
+      var nv = function (x) { return x === null || x === undefined ? '樣本不足' : String(x); };
+      if (U.practice) body.appendChild(h('p', { cls: 'alert practice', role: 'note', text: '演練預覽：只用演練病人計算，不是正式數字。' }));
+      body.appendChild(h('p', { cls: 'muted', text: '期間 ' + U.period.label + '｜歸屬規則版本 ' + U.version + '｜人數少於 ' + U.mask_min_n + ' 不顯示' }));
+      body.appendChild(h('h2', { text: '第一軸：實際執行' }));
+      body.appendChild(rtable(['計量', '數值', '說明'], [
+        ['U1 完成的接觸', U.units.U1_encounters, '實際服務事件，不因跨疾病歸屬增加'],
+        ['U2 教學與確認列', U.units.U2_content_rows, '不含交付、提問照答、補登'],
+        ['U5 不重複病人', nv(U.units.U5_persons), '全院數；不得用各疾病人數相加'],
+        ['歷史補登列', U.units.backfill_rows, '另列，不進當期服務量']
+      ].map(function (r) { return h('tr', null, h('td', { text: r[0] }), h('td', { cls: 'num', text: String(r[1]) }), h('td', { text: r[2] })); }), true));
+      body.appendChild(h('h2', { text: '第二軸：各疾病獲得的有效衛教' }));
+      body.appendChild(h('p', { cls: 'muted', text: 'U3 合格疾病歸屬 ' + U.units.U3_attributions + '｜U4 疾病學習達成 ' + U.units.U4_achieved + '｜' + U.overlap.note + '（各疾病相加 ' + U.overlap.disease_person_sum + '，不重複 ' + nv(U.overlap.unique_persons) + '）' }));
+      body.appendChild(stackTable(rtable(['疾病', '病人', '疾病專屬項目病人', '共通項目病人', '教回通過', '合格歸屬', '其中專屬', '其中共通', '補登病人', '待核准'], U.diseases.map(function (d) {
+        return h('tr', null, h('td', { text: d.name }), [d.persons, d.specific_persons, d.common_persons, d.pass_persons, d.attributions, d.specific_rows, d.common_rows, d.backfill_persons, d.pending].map(function (x) { return h('td', { cls: 'num', text: nv(x) }); }));
+      }))));
+      body.appendChild(h('p', { cls: 'muted', text: '共通項目＝跨疾病共享配對、多疾病項目、共通核心；疾病涵蓋請以「疾病專屬」欄判讀。人數未達遮蔽門檻時，同列列數一併遮蔽。' }));
+      if (U.conflict_gov) {
+        body.appendChild(h('h2', { text: '衝突治理（CG1–CG6）' }));
+        body.appendChild(stackTable(rtable(['指標', '分子', '分母', '比例', '解讀限制'], U.conflict_gov.rows.map(function (g) {
+          return h('tr', null, h('td', { text: g.id + ' ' + g.label }), h('td', { cls: 'num', text: nv(g.num) }), h('td', { cls: 'num', text: nv(g.den) }), h('td', { cls: 'num', text: g.value === null ? '—' : g.value + '%' }), h('td', { text: g.limit }));
+        }))));
+      }
+      body.appendChild(h('h2', { text: '職類：實際執行（一列只算一次）' }));
+      body.appendChild(stackTable(rtable(['職類', '教學列', '確認列', '確認他職類教過的', '病人'], U.roles.map(function (r) { return h('tr', null, h('td', { text: r.name }), [r.teach_rows, r.confirm_rows, r.confirm_of_others, r.persons].map(function (x) { return h('td', { cls: 'num', text: nv(x) }); })); }))));
+      body.appendChild(h('h2', { text: '共享治理與資料品質' }));
+      var rej = Object.keys(U.sharing.SH3_rejected).map(function (k) { return k + ' ' + U.sharing.SH3_rejected[k]; }).join('、') || '無';
+      var q = U.quality;
+      body.appendChild(rtable(['項目', '數值'], [
+        ['SH1 一列歸屬兩個以上疾病', U.sharing.SH1_shared_rows], ['SH2 這些列的疾病歸屬數', U.sharing.SH2_shared_attributions], ['SH3 未合格歸屬（依原因）', rej], ['SH4 母項目已會、差額未教', U.sharing.SH4_diff_pending],
+        ['共享配對：已簽核／全部', q.share_signed + ' / ' + q.share_rows], ['未合格歸屬比例', q.rejected_ratio.value === null ? '—' : q.rejected_ratio.value + '%（' + q.rejected_ratio.num + ' / ' + q.rejected_ratio.den + '）'],
+        ['補登占全部列', q.backfill_ratio.value === null ? '—' : q.backfill_ratio.value + '%'], ['C1 面向涵蓋', q.c1_unbuilt || '可計算']
+      ].map(function (r) { return h('tr', null, h('td', { text: r[0] }), h('td', { text: String(r[1]) })); }), true));
+      body.appendChild(h('p', { cls: 'muted', text: U.sharing.note }));
+      if (S.me.permission === 'L3') body.appendChild(freezePanel());
+    }).catch(function (e) { fail(e, body); });
+  }
+  /** v1.8.0 W06-B08：正式統計定版（預覽差異 → 輸入授權字句 → 新版本；舊版保留） */
+  function freezePanel() {
+    var w = h('div', { cls: 'panel' }, h('h3', { text: '正式統計定版（L3）' })), out = h('div');
+    var inp = h('input', { type: 'text', 'aria-label': '授權字句', placeholder: '確認後輸入授權字句' });
+    w.appendChild(h('button', { cls: 'btn ghost', type: 'button', text: '預覽與上次定版的差異', on: { click: function () {
+      api('stats.freezePreview', { from: DV.from, to: DV.to }).then(function (P) {
+        clear(out);
+        out.appendChild(h('p', { text: '期間 ' + P.period.label + '｜本次規則版本 ' + P.version + (P.prev_freeze ? '｜上次定版 ' + P.prev_freeze + '（' + P.prev_version + '）' : '｜尚未定版') + '｜' + P.rows + ' 列，變動 ' + P.changed + ' 列' }));
+        if (P.diff.length) out.appendChild(rtable(['指標', '範圍', '上次', '本次'], P.diff.slice(0, 50).map(function (d) { return h('tr', null, h('td', { text: d.indicator_id }), h('td', { text: d.scope }), h('td', { text: d.old ? d.old.num + ' / ' + d.old.den : '—' }), h('td', { text: d.now.num + ' / ' + d.now.den })); })));
+        out.appendChild(h('p', { cls: 'muted', text: '授權字句：' + P.confirm }));
+        out.appendChild(inp);
+        out.appendChild(h('button', { cls: 'btn', type: 'button', text: '定版', on: { click: function () { api('stats.freeze', { from: DV.from, to: DV.to, confirm: inp.value.trim() }).then(function (r) { toast('已定版 ' + r.rows + ' 列（' + r.freeze_id + '）'); }).catch(function (e) { fail(e, out); }); } } }));
+      }).catch(function (e) { fail(e, out); });
+    } } }));
+    w.appendChild(out);
+    return w;
   }
   function unitsView(body) {
     var ids = (S.dashIds || ['M1', 'M4', 'B1', 'H1', 'H2', 'APPT1', 'MSG2', 'C2']);
@@ -1709,7 +1880,7 @@
     tile.appendChild(h('div', { cls: 'nm', text: c.name }));
     var na = c.masked || c.value === null || c.value === undefined;
     tile.appendChild(h('div', { cls: 'v' + (na ? ' na' : '') }, fmt(c), !na ? h('small', { text: unitOf(c) }) : null));
-    tile.appendChild(h('div', { cls: 'fr', text: c.masked ? 'n = ' + c.den : (c.num !== null && c.den !== null ? c.num + ' / ' + c.den : (c.den !== null ? 'n = ' + c.den + (c.p90 ? '｜P90 ' + c.p90 : '') : '')) + (c.pending ? '｜觀察期未屆滿 ' + c.pending : '') + (c.target ? '｜目標 ' + c.target.value : '') }));
+    tile.appendChild(h('div', { cls: 'fr', text: c.masked ? 'n = ' + c.den : (c.num !== null && c.den !== null ? c.num + ' / ' + c.den : (c.den !== null ? 'n = ' + c.den + (c.p90 ? '｜P90 ' + c.p90 : '') : '')) + (c.pending ? '｜觀察期未屆滿 ' + c.pending : '') + (c.target ? '｜目標 ' + c.target.value : '') + (c.unbuilt ? c.unbuilt : '') }));
     var x = c.extra || {};
     if (x.improved !== undefined && !c.masked) tile.appendChild(h('div', { cls: 'fr', text: '改善 ' + x.improved + '｜持平 ' + x.same + '｜惡化 ' + x.worse + '｜未配對 ' + x.unpaired }));
     if (x.baseline_best !== undefined && !c.masked && x.baseline_best) tile.appendChild(h('div', { cls: 'fr', text: '基線已最佳（不入分母）' + x.baseline_best + (x.baseline_best_worse ? '，其中變差 ' + x.baseline_best_worse : '') }));
